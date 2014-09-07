@@ -21,6 +21,7 @@
     NSMenu *_dummyMenu;
     NSPopover *_popover;
     id _popoverTransiencyMonitor;
+    BOOL _wasDragging;
 }
 @end
 
@@ -61,6 +62,7 @@
         
         _active = NO;
         _animated = YES;
+        _wasDragging = NO;
     }
     return self;
 }
@@ -98,8 +100,14 @@
 #pragma mark - Mouse Actions
 ////////////////////////////////////
 
-- (void)mouseDown:(NSEvent *)theEvent
+- (void)mouseUp:(NSEvent *)theEvent
 {
+    if (_wasDragging)
+    {
+        _wasDragging = NO;
+        return;
+    }
+    
     if (_popover.isShown) {
         [self hidePopover];
     } else {
@@ -107,9 +115,14 @@
     }    
 }
 
-- (void)rightMouseDown:(NSEvent *)theEvent
+- (void)rightMouseUp:(NSEvent *)theEvent
 {
-    [self mouseDown:nil];
+    [self mouseUp:nil];
+}
+
+- (void)mouseDragged:(NSEvent *)theEvent
+{
+    _wasDragging = YES;
 }
 
 ////////////////////////////////////
