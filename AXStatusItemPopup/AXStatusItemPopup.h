@@ -16,7 +16,15 @@
 @property(strong, nonatomic) NSImage *image;
 @property(strong, nonatomic) NSImage *alternateImage;
 @property(strong, nonatomic) NSStatusItem *statusItem;
+@property(assign, nonatomic) BOOL oneShot;
 
+/**
+ Popovers may have one of several predefined appearances.
+ You may specify the appearance of a popover using the constants defined in NSPopoverAppearance. The default appearance is NSPopoverAppearanceMinimal.
+ 
+ @param appearance NSPopoverAppearance
+ */
+@property(nonatomic, strong, readonly) NSPopover *popover;
 
 // init
 - (id)initWithViewController:(NSViewController *)controller;

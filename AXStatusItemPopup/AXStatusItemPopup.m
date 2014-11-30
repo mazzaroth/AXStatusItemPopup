@@ -13,16 +13,21 @@
 //
 // Private variables
 //
-@interface AXStatusItemPopup () {
+@interface AXStatusItemPopup ()
+{
     NSViewController *_viewController;
     BOOL _active;
     NSImageView *_imageView;
     NSStatusItem *_statusItem;
     NSMenu *_dummyMenu;
-    NSPopover *_popover;
     id _popoverTransiencyMonitor;
     BOOL _wasDragging;
+    NSPoint _dragStartPoint;
+    NSUInteger _draggedEventCount; // resets to 0 on mousedown mouseup
 }
+
+@property(nonatomic, strong, readwrite) NSPopover* popover;
+
 @end
 
 ///////////////////////////////////
@@ -46,14 +51,14 @@
 {
     CGFloat height = [NSStatusBar systemStatusBar].thickness;
     
-    self = [super initWithFrame:NSMakeRect(0, 0, kMinViewWidth, height)];
+    self = [super initWithFrame:NSMakeRect(0, 0, image.size.width, height)];
     if (self) {
         _viewController = controller;
         
         self.image = image;
         self.alternateImage = alternateImage;
         
-        _imageView = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, kMinViewWidth, height)];
+        _imageView = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, image.size.width, height)];
         [self addSubview:_imageView];
         
         self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
@@ -63,6 +68,7 @@
         _active = NO;
         _animated = YES;
         _wasDragging = NO;
+        _oneShot = NO;
     }
     return self;
 }
@@ -100,19 +106,41 @@
 #pragma mark - Mouse Actions
 ////////////////////////////////////
 
+- (void)mouseDown:(NSEvent *)theEvent
+{
+    _wasDragging = NO;
+    _dragStartPoint = NSEvent.mouseLocation;
+    [self mouseDeltaOccurred:theEvent];
+    _draggedEventCount = 0;
+}
+
 - (void)mouseUp:(NSEvent *)theEvent
 {
+    _draggedEventCount = 0;
     if (_wasDragging)
     {
+        [self mouseDeltaOccurred:theEvent];
         _wasDragging = NO;
         return;
     }
-    
-    if (_popover.isShown) {
+    else
+    {
+        [self mouseDeltaOccurred:theEvent];
+//        return;
+    }
+
+    if (_popover.isShown)
+    {
         [self hidePopover];
-    } else {
+    }
+    else if (!_popover.isShown && _oneShot)
+    {
+        _oneShot = NO;
+    }
+    else if (!_popover.isShown)
+    {
         [self showPopover];
-    }    
+    }
 }
 
 - (void)rightMouseUp:(NSEvent *)theEvent
@@ -123,6 +151,71 @@
 - (void)mouseDragged:(NSEvent *)theEvent
 {
     _wasDragging = YES;
+    [self mouseDeltaOccurred:theEvent];
+}
+
+- (void)mouseDeltaOccurred:(NSEvent *)theMouseEvent
+{
+    double deltaX = [NSEvent mouseLocation].x-_dragStartPoint.x;
+    double deltaY = [NSEvent mouseLocation].y-_dragStartPoint.y;
+    double normalizedDeltaX = deltaX/[[NSScreen mainScreen] frame].size.width; // normalized delta-to-display width
+    double normalizedDeltaY = deltaY/[[NSScreen mainScreen] frame].size.height; // normalized delta-to-display height
+    
+    NSDictionary *delta = @{@"deltaX":[NSNumber numberWithDouble:deltaX],
+                            @"deltaY":[NSNumber numberWithDouble:deltaY],
+                            @"normalizedDeltaX": [NSNumber numberWithDouble:normalizedDeltaX],
+                            @"normalizedDeltaY": [NSNumber numberWithDouble:normalizedDeltaY],
+                            @"relativeDeltaX": [NSNumber numberWithDouble:[theMouseEvent deltaX]]};
+    
+    if ([theMouseEvent type] == NSLeftMouseUp || [theMouseEvent type] == NSRightMouseUp)
+    {
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"kStatusItemMouseUpNotification" object:nil userInfo:delta];
+    }
+    else if ([theMouseEvent type] == NSLeftMouseDragged || [theMouseEvent type] == NSRightMouseDragged)
+    {
+        _draggedEventCount++;
+        [self _postNotificationDictionary:delta forNormalizedDeltaY:normalizedDeltaY];
+    }
+    else if ([theMouseEvent type] == NSLeftMouseDown || [theMouseEvent type] == NSRightMouseDown)
+    {
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"kStatusItemMouseDownNotification" object:nil userInfo:@{@"startPointX": [NSNumber numberWithDouble:_dragStartPoint.x],
+                                                                                                                             @"startPointY": [NSNumber numberWithDouble:_dragStartPoint.y]
+                                                                                                                             }];
+    }
+}
+
+- (void)_postNotificationDictionary:(NSDictionary*)note_ forNormalizedDeltaY:(double)normalizedDeltaY_
+{
+    BOOL doPost = NO;
+    if (normalizedDeltaY_ >=-0.1)
+    {
+        doPost = YES;
+    }
+    else if (normalizedDeltaY_ >=-0.2 && normalizedDeltaY_ <=-0.1 && _draggedEventCount%2 == 0)
+    {
+        doPost = YES;
+    }
+    else if (normalizedDeltaY_ >=-0.3 && normalizedDeltaY_ <=-0.2 && _draggedEventCount%3 == 0)
+    {
+        doPost = YES;
+    }
+    else if (normalizedDeltaY_ >=-0.4 && normalizedDeltaY_ <=-0.3 && _draggedEventCount%5 == 0)
+    {
+        doPost = YES;
+    }
+    else if (normalizedDeltaY_ >=-0.5 && normalizedDeltaY_ <=-0.4 && _draggedEventCount%8 == 0)
+    {
+        doPost = YES;
+    }
+    else if (normalizedDeltaY_ >=-1.0 && normalizedDeltaY_ <=-0.5 && _draggedEventCount%13 == 0)
+    {
+        doPost = YES;
+    }
+    
+    if (doPost)
+    {
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"kStatusItemMouseDraggedDeltaNotification" object:nil userInfo:note_];
+    }
 }
 
 ////////////////////////////////////
@@ -156,7 +249,7 @@
 
 - (void)updateViewFrame
 {
-    CGFloat width = MAX(MAX(kMinViewWidth, self.alternateImage.size.width), self.image.size.width);
+    CGFloat width = MAX(MAX(self.image.size.width, self.alternateImage.size.width), self.image.size.width);
     CGFloat height = [NSStatusBar systemStatusBar].thickness;
     
     NSRect frame = NSMakeRect(0, 0, width, height);
